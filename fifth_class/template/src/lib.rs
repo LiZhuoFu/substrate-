@@ -27,6 +27,7 @@ pub enum Event<T: Config> {
   ClaimCreated { who: T::AccountId, claim: T::Hash },
   /// Event emitted when a claim is revoked by the owner.
   ClaimRevoked { who: T::AccountId, claim: T::Hash },
+  ClaimMoved(T::AccountId, T::AccountId, T::Hash),
 }
 #[pallet::error]
 pub enum Error<T> {
@@ -36,6 +37,7 @@ pub enum Error<T> {
   NoSuchClaim,
   /// The claim is owned by another account, so caller can't revoke it.
   NotClaimOwner,
+  DestinationIsClaimOwner,
 }
 #[pallet::storage]
 pub(super) type Claims<T: Config> = StorageMap<_, Blake2_128Concat, T::Hash, (T::AccountId, T::BlockNumber)>;
@@ -85,5 +87,24 @@ impl<T: Config> Pallet<T> {
     // Emit an event that the claim was erased.
     Self::deposit_event(Event::ClaimRevoked { who: sender, claim });
     Ok(())
+  }
+  #[pallet::weight(0)]
+  #[pallet::call_index(3)]
+  pub fn move_claim(
+      origin: OriginFor<T>,
+      destination: T::AccountId,
+      claim: T::Hash
+  ) -> DispatchResultWithPostInfo {
+      let sender = ensure_signed(origin)?;
+      let (owner, _) = Claims::<T>::get(&claim).ok_or(Error::<T>::NoSuchClaim)?;
+      ensure!(owner == sender, Error::<T>::NotClaimOwner);
+      ensure!(owner != destination, Error::<T>::DestinationIsClaimOwner);
+      Claims::<T>::remove(&claim);
+      Claims::<T>::insert(
+          &claim,
+          (destination.clone(), <frame_system::Pallet::<T>>::block_number()),
+      );
+      Self::deposit_event(Event::ClaimMoved(sender, destination, claim));
+      Ok(())
   }
 }}
